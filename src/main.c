@@ -574,6 +574,25 @@ static bool full_refresh(void)
 		restore_source = 0;
 	}
 
+	if (deferred_source)
+	{
+		g_source_remove(deferred_source);
+		deferred_source = 0;
+	}
+
+	/*
+	 * A full refresh leaves the panel clean, which is everything auto's
+	 * return to the still waveform is for - so count it as the return: the
+	 * restore below lands on the still value, and the shell, seeing
+	 * active:false in the status, drops its own pending return rather than
+	 * flashing the panel a second time seconds later.
+	 */
+	if (screen_active)
+	{
+		screen_active = false;
+		post_status();
+	}
+
 	if (!write_register(CMD_CLEAR) || !write_register(CMD_AFTER_CLEAR))
 	{
 		return false;
