@@ -43,7 +43,7 @@
  * refresh_mode attribute reads the last selection back as 0..3 - but stock
  * never rests on either, so neither is offered.)
  *
- * Hybrid is "auto" here: the base waveform while the screen is still, the fast
+ * Hybrid is "auto" here: the Balanced waveform while the screen is still, the fast
  * one while it is moving. Stock decides "moving" with a WindowMonitor inside
  * system_server that watches scroll, animation and video state; here the shell
  * decides, from the frames the compositor actually renders, and says so through
@@ -116,7 +116,7 @@ static const struct mode modes[] =
 {
 	{ "slow",     1, 0, "Slow",     "Full greyscale, best for images; slowest." },
 	{ "balanced", 2, 0, "Balanced", "Greyscale; clearer text and less ghosting than Slow." },
-	{ "auto",     1, 4, "Auto",     "Slow while the screen is still, Ultra while it is moving." },
+	{ "auto",     2, 4, "Auto",     "Balanced while the screen is still, Ultra while it is moving." },
 	{ "text",     3, 0, "Text",     "Nearly black and white: crisp text, images lose their greys." },
 	{ "ultra",    4, 0, "Ultra",    "Fastest refresh; most ghosting, best for scrolling and video." },
 };

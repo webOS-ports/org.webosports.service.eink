@@ -62,8 +62,8 @@ refresh key.
 Modes
 -----
 In order of speed: `slow` (register 1, full greyscale), `balanced` (2,
-greyscale, clearer with less ghosting), `auto` (1, and 4 while active -
-stock's "Hybrid"), `text` (3, nearly two-level), `ultra` (4, fastest). The
+greyscale, clearer with less ghosting), `auto` (2, and 4 while active -
+stock's "Hybrid" resting on the clearer waveform), `text` (3, nearly two-level), `ultra` (4, fastest). The
 status carries `active` alongside `mode`.
 
 Refresh key
