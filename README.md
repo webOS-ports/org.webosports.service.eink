@@ -47,6 +47,12 @@ the status.
 `{}` — a full refresh (clear) that removes ghosting; the current mode is put
 back afterwards. Replies with the status.
 
+Refresh key
+-----------
+The service also watches evdev for key code 252 (Android's `AREFRESH`, the
+button between volume up and down on the MP01): a short press is a full
+refresh, a press held for 400 ms opens `org.webosports.app.settings.display`.
+
 Copyright and License Information
 ---------------------------------
 Copyright (c) 2026 Herman van Hazendonk

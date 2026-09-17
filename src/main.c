@@ -52,18 +52,30 @@
  * The chosen mode is persisted as the systemservice preference
  * "einkRefreshMode", the same store the Display panel already uses for its
  * other settings, so the shell can subscribe to it too.
+ *
+ * The refresh key. The MP01 has a button between volume up and down that the
+ * kernel reports as key code 252 - Android's Generic.kl maps it to
+ * KEYCODE_AREFRESH, and stock's PhoneWindowManager does a full refresh on a
+ * short press and opens Minimal's quick settings after 400 ms. That is
+ * handled here rather than in the compositor: the code is not in Qt's evdev
+ * keymap so nothing else would see it, and reading it from evdev directly
+ * means it works on the lock screen and before the shell is up. The long
+ * press opens the Display settings, the LuneOS equivalent of the quick
+ * settings.
  */
 
 #include <errno.h>
 #include <fcntl.h>
 #include <glib.h>
 #include <glob.h>
+#include <linux/input.h>
 #include <luna-service2/lunaservice.h>
 #include <pbnjson.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 
 #define EINK_SERVICE "org.webosports.service.eink"
@@ -74,6 +86,14 @@
 #define CMD_CLEAR 5
 #define CMD_AFTER_CLEAR 3
 #define RESTORE_DELAY_MS 100
+
+/*
+ * The refresh key. Not in input-event-codes.h - 252 is vendor space - so it is
+ * named here after Android's keylayout entry for it.
+ */
+#define KEY_AREFRESH 252
+#define LONG_PRESS_MS 400
+#define SETTINGS_APP "org.webosports.app.settings.display"
 
 struct mode
 {
@@ -102,6 +122,13 @@ static bool prefs_loaded = false;
 static guint restore_source = 0;
 static guint prefs_retry_source = 0;
 static int prefs_attempts = 0;
+
+static int key_fd = -1;
+static guint key_source = 0;
+static guint key_scan_source = 0;
+static int key_scan_attempts = 0;
+static guint long_press_source = 0;
+static bool long_press_fired = false;
 
 /*
  * The hub went away - restarted, or crashed. The registration made by
@@ -469,13 +496,8 @@ static gboolean restore_mode(gpointer data)
  * base mode back after 100 ms. A second request inside that window just
  * restarts the timer; the panel is already clearing.
  */
-static bool cb_refresh(LSHandle *sh, LSMessage *message, void *ctx)
+static bool full_refresh(void)
 {
-	if (!ensure_register())
-	{
-		return reply_error(sh, message, "no E Ink panel on this device");
-	}
-
 	if (restore_source)
 	{
 		g_source_remove(restore_source);
@@ -484,11 +506,177 @@ static bool cb_refresh(LSHandle *sh, LSMessage *message, void *ctx)
 
 	if (!write_register(CMD_CLEAR) || !write_register(CMD_AFTER_CLEAR))
 	{
-		return reply_error(sh, message, "the panel rejected the refresh");
+		return false;
 	}
 
 	restore_source = g_timeout_add(RESTORE_DELAY_MS, restore_mode, NULL);
+	return true;
+}
+
+static bool cb_refresh(LSHandle *sh, LSMessage *message, void *ctx)
+{
+	if (!ensure_register())
+	{
+		return reply_error(sh, message, "no E Ink panel on this device");
+	}
+
+	if (!full_refresh())
+	{
+		return reply_error(sh, message, "the panel rejected the refresh");
+	}
+
 	return reply_status(sh, message);
+}
+
+/* ------------------------------------------------------------ refresh key -- */
+
+static bool cb_launched(LSHandle *sh, LSMessage *reply, void *ctx)
+{
+	return true;
+}
+
+static gboolean long_press(gpointer data)
+{
+	LSError lserror;
+
+	long_press_source = 0;
+	long_press_fired = true;
+	LSErrorInit(&lserror);
+
+	if (!LSCallOneReply(service_handle,
+	                    "luna://com.webos.service.applicationManager/launch",
+	                    "{\"id\":\"" SETTINGS_APP "\"}",
+	                    cb_launched, NULL, NULL, &lserror))
+	{
+		LSErrorPrint(&lserror, stderr);
+		LSErrorFree(&lserror);
+	}
+
+	return G_SOURCE_REMOVE;
+}
+
+static gboolean scan_for_refresh_key(gpointer data);
+
+static void close_refresh_key(void)
+{
+	if (key_source)
+	{
+		g_source_remove(key_source);
+		key_source = 0;
+	}
+
+	if (key_fd >= 0)
+	{
+		close(key_fd);
+		key_fd = -1;
+	}
+}
+
+static gboolean on_key_event(GIOChannel *channel, GIOCondition cond, gpointer data)
+{
+	struct input_event ev;
+	ssize_t n;
+
+	if (cond & (G_IO_ERR | G_IO_HUP | G_IO_NVAL))
+	{
+		g_warning("refresh key device went away; looking for it again");
+		close_refresh_key();
+		key_scan_attempts = 0;
+		key_scan_source = g_timeout_add_seconds(2, scan_for_refresh_key, NULL);
+		return G_SOURCE_REMOVE;
+	}
+
+	while ((n = read(key_fd, &ev, sizeof(ev))) == (ssize_t)sizeof(ev))
+	{
+		if (ev.type != EV_KEY || ev.code != KEY_AREFRESH)
+		{
+			continue;
+		}
+
+		if (ev.value == 1)
+		{
+			long_press_fired = false;
+
+			if (long_press_source)
+			{
+				g_source_remove(long_press_source);
+			}
+
+			long_press_source = g_timeout_add(LONG_PRESS_MS, long_press, NULL);
+		}
+		else if (ev.value == 0)
+		{
+			if (long_press_source)
+			{
+				g_source_remove(long_press_source);
+				long_press_source = 0;
+			}
+
+			if (!long_press_fired && ensure_register())
+			{
+				full_refresh();
+			}
+		}
+	}
+
+	return G_SOURCE_CONTINUE;
+}
+
+/*
+ * The keypad is built in, but its driver is one of the vendor modules and may
+ * come up after this service, so the scan is retried for a while. Whichever
+ * device advertises the key code is taken; the read is shared, not a grab, so
+ * the compositor still sees the device (it ignores the code).
+ */
+static gboolean scan_for_refresh_key(gpointer data)
+{
+	unsigned long bits[(KEY_MAX + 1 + 8 * sizeof(unsigned long) - 1) / (8 * sizeof(unsigned long))];
+	char path[32], name[64];
+
+	key_scan_source = 0;
+
+	for (int i = 0; i < 32 && key_fd < 0; i++)
+	{
+		int fd;
+
+		snprintf(path, sizeof(path), "/dev/input/event%d", i);
+		fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+
+		if (fd < 0)
+		{
+			continue;
+		}
+
+		memset(bits, 0, sizeof(bits));
+
+		if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(bits)), bits) >= 0 &&
+		        (bits[KEY_AREFRESH / (8 * sizeof(unsigned long))] >>
+		         (KEY_AREFRESH % (8 * sizeof(unsigned long)))) & 1UL)
+		{
+			GIOChannel *channel = g_io_channel_unix_new(fd);
+
+			if (ioctl(fd, EVIOCGNAME(sizeof(name)), name) < 0)
+			{
+				g_strlcpy(name, "?", sizeof(name));
+			}
+
+			g_message("refresh key (code %d) on %s (%s)", KEY_AREFRESH, path, name);
+			key_fd = fd;
+			key_source = g_io_add_watch(channel, G_IO_IN | G_IO_ERR | G_IO_HUP | G_IO_NVAL,
+			                            on_key_event, NULL);
+			g_io_channel_unref(channel);
+			break;
+		}
+
+		close(fd);
+	}
+
+	if (key_fd < 0 && key_scan_attempts++ < 30)
+	{
+		key_scan_source = g_timeout_add_seconds(2, scan_for_refresh_key, NULL);
+	}
+
+	return G_SOURCE_REMOVE;
 }
 
 static LSMethod methods[] =
@@ -531,9 +719,11 @@ int main(int argc, char **argv)
 	ensure_register();
 	subscribe_preference(NULL);
 	g_timeout_add_seconds(5, apply_default_if_unanswered, NULL);
+	scan_for_refresh_key(NULL);
 
 	g_main_loop_run(loop);
 
+	close_refresh_key();
 	LSUnregister(service_handle, &lserror);
 	g_main_loop_unref(loop);
 	g_free(register_path);
