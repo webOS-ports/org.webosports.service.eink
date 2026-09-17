@@ -47,11 +47,30 @@ the status.
 `{}` — a full refresh (clear) that removes ghosting; the current mode is put
 back afterwards. Replies with the status.
 
+### `setActive`
+
+`{"active": bool}` — the shell's word on whether the screen is moving. In the
+`auto` mode the panel is on its fast waveform while active and on the clean
+one otherwise; the other modes ignore it. luna-next-cardshell derives it from
+the frames the compositor renders (`Connectors/EinkRefresh.qml`).
+
+### `watchKey`
+
+`{"subscribe": true}` — posts `{"event": "shortPress"|"longPress"}` for the
+refresh key.
+
+Modes
+-----
+`slow` (register 1), `auto` (1, and 4 while active - stock's "Hybrid"),
+`ultra` (4). The status carries `active` alongside `mode`.
+
 Refresh key
 -----------
 The service also watches evdev for key code 252 (Android's `AREFRESH`, the
 button between volume up and down on the MP01): a short press is a full
-refresh, a press held for 400 ms opens `org.webosports.app.settings.display`.
+refresh; a press held for 400 ms is posted to `watchKey` subscribers (the
+shell opens its refresh menu), or, with none, opens
+`org.webosports.app.settings.display`.
 
 Copyright and License Information
 ---------------------------------

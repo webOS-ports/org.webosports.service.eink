@@ -43,11 +43,11 @@
  * refresh_mode attribute reads the last selection back as 0..3 - but stock
  * never rests on either, so neither is offered.)
  *
- * Hybrid is not offered yet. Stock implements it with a WindowMonitor inside
- * system_server that watches scroll, animation and video state; the LuneOS
- * equivalent would be the compositor telling this service when to go fast,
- * which is a later step. The API is shaped so that adding a mode is a table
- * entry.
+ * Hybrid is "auto" here: the base waveform while the screen is still, the fast
+ * one while it is moving. Stock decides "moving" with a WindowMonitor inside
+ * system_server that watches scroll, animation and video state; here the shell
+ * decides, from the frames the compositor actually renders, and says so through
+ * setActive. Without a shell to say anything, auto behaves as slow.
  *
  * The chosen mode is persisted as the systemservice preference
  * "einkRefreshMode", the same store the Display panel already uses for its
@@ -98,19 +98,21 @@
 struct mode
 {
 	const char *id;
-	int value;
+	int value;        /* register value while the screen is still */
+	int active_value; /* register value while it is moving; 0 = same */
 	const char *label;
 	const char *description;
 };
 
 static const struct mode modes[] =
 {
-	{ "slow",  1, "Slow",  "Best quality; for reading and text." },
-	{ "ultra", 4, "Ultra", "Fast refresh; more ghosting, better for scrolling and video." },
+	{ "slow",  1, 0, "Slow",  "Best quality; for reading and text." },
+	{ "auto",  1, 4, "Auto",  "Best quality while the screen is still, fast refresh while it is moving." },
+	{ "ultra", 4, 0, "Ultra", "Fast refresh; more ghosting, better for scrolling and video." },
 };
 
 #define N_MODES ((int)(sizeof(modes) / sizeof(modes[0])))
-#define DEFAULT_MODE 0
+#define DEFAULT_MODE 1
 
 static LSHandle *service_handle = NULL;
 static GMainLoop *main_loop = NULL;
@@ -118,6 +120,7 @@ static int exit_status = 0;
 
 static char *register_path = NULL;
 static int current_mode = DEFAULT_MODE;
+static bool screen_active = false;
 static bool prefs_loaded = false;
 static guint restore_source = 0;
 static guint prefs_retry_source = 0;
@@ -217,9 +220,15 @@ static int find_mode(const char *id, size_t len)
 	return -1;
 }
 
+static int wanted_value(void)
+{
+	const struct mode *m = &modes[current_mode];
+	return (screen_active && m->active_value) ? m->active_value : m->value;
+}
+
 static bool apply_mode(void)
 {
-	return write_register(modes[current_mode].value);
+	return write_register(wanted_value());
 }
 
 static jvalue_ref build_status(void)
@@ -240,6 +249,7 @@ static jvalue_ref build_status(void)
 	jobject_put(reply, J_CSTR_TO_JVAL("returnValue"), jboolean_create(true));
 	jobject_put(reply, J_CSTR_TO_JVAL("available"), jboolean_create(available));
 	jobject_put(reply, J_CSTR_TO_JVAL("mode"), jstring_create(modes[current_mode].id));
+	jobject_put(reply, J_CSTR_TO_JVAL("active"), jboolean_create(screen_active));
 	jobject_put(reply, J_CSTR_TO_JVAL("modes"), list);
 	return reply;
 }
@@ -528,7 +538,90 @@ static bool cb_refresh(LSHandle *sh, LSMessage *message, void *ctx)
 	return reply_status(sh, message);
 }
 
+/*
+ * setActive {"active": bool} - the shell's word on whether the screen is
+ * moving. Only "auto" acts on it; the flag is kept for the other modes so a
+ * later switch to auto starts from the right state. The shell owns the timing
+ * (how many frames make "moving", how long a pause makes "still"), this only
+ * applies the answer.
+ */
+static bool cb_set_active(LSHandle *sh, LSMessage *message, void *ctx)
+{
+	JSchemaInfo schema;
+	jvalue_ref parsed, value;
+	bool active;
+
+	jschema_info_init(&schema, jschema_all(), NULL, NULL);
+	parsed = jdom_parse(j_cstr_to_buffer(LSMessageGetPayload(message)),
+	                    DOMOPT_NOOPT, &schema);
+
+	if (jis_null(parsed) ||
+	        !jobject_get_exists(parsed, J_CSTR_TO_BUF("active"), &value) ||
+	        !jis_boolean(value))
+	{
+		j_release(&parsed);
+		return reply_error(sh, message, "need \"active\": boolean");
+	}
+
+	jboolean_get(value, &active);
+	j_release(&parsed);
+
+	if (active != screen_active)
+	{
+		int before = wanted_value();
+
+		screen_active = active;
+
+		/* No register write while a refresh is settling; restore_mode covers it. */
+		if (wanted_value() != before && !restore_source && ensure_register())
+		{
+			apply_mode();
+		}
+
+		post_status();
+	}
+
+	return reply_status(sh, message);
+}
+
 /* ------------------------------------------------------------ refresh key -- */
+
+/*
+ * watchKey {"subscribe": true} - the shell's way of taking the long press over.
+ * Each press posts {"event": "shortPress"|"longPress"}. The short press is
+ * always a full refresh, done here. The long press is the shell's to show its
+ * menu on; with nobody watching it falls back to opening the Display settings.
+ */
+static bool cb_watch_key(LSHandle *sh, LSMessage *message, void *ctx)
+{
+	LSError lserror;
+	LSErrorInit(&lserror);
+
+	if (LSMessageIsSubscription(message) &&
+	        !LSSubscriptionProcess(sh, message, &(bool){false}, &lserror))
+	{
+		LSErrorPrint(&lserror, stderr);
+		LSErrorFree(&lserror);
+	}
+
+	return reply_status(sh, message);
+}
+
+static void post_key_event(const char *event)
+{
+	LSError lserror;
+	char *payload = g_strdup_printf("{\"returnValue\":true,\"event\":\"%s\"}", event);
+
+	LSErrorInit(&lserror);
+
+	if (!LSSubscriptionReply(service_handle, "/watchKey", payload, &lserror))
+	{
+		LSErrorPrint(&lserror, stderr);
+		LSErrorFree(&lserror);
+	}
+
+	g_free(payload);
+}
 
 static bool cb_launched(LSHandle *sh, LSMessage *reply, void *ctx)
 {
@@ -541,6 +634,13 @@ static gboolean long_press(gpointer data)
 
 	long_press_source = 0;
 	long_press_fired = true;
+
+	if (LSSubscriptionGetHandleSubscribersCount(service_handle, "/watchKey") > 0)
+	{
+		post_key_event("longPress");
+		return G_SOURCE_REMOVE;
+	}
+
 	LSErrorInit(&lserror);
 
 	if (!LSCallOneReply(service_handle,
@@ -612,9 +712,14 @@ static gboolean on_key_event(GIOChannel *channel, GIOCondition cond, gpointer da
 				long_press_source = 0;
 			}
 
-			if (!long_press_fired && ensure_register())
+			if (!long_press_fired)
 			{
-				full_refresh();
+				post_key_event("shortPress");
+
+				if (ensure_register())
+				{
+					full_refresh();
+				}
 			}
 		}
 	}
@@ -683,7 +788,9 @@ static LSMethod methods[] =
 {
 	{ "getStatus", cb_get_status, LUNA_METHOD_FLAGS_NONE },
 	{ "setMode",   cb_set_mode,   LUNA_METHOD_FLAGS_NONE },
+	{ "setActive", cb_set_active, LUNA_METHOD_FLAGS_NONE },
 	{ "refresh",   cb_refresh,    LUNA_METHOD_FLAGS_NONE },
+	{ "watchKey",  cb_watch_key,  LUNA_METHOD_FLAGS_NONE },
 	{ NULL, NULL, LUNA_METHOD_FLAGS_NONE },
 };
 

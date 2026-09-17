@@ -2,6 +2,8 @@
     "eink.operation": [
         "org.webosports.service.eink/getStatus",
         "org.webosports.service.eink/setMode",
-        "org.webosports.service.eink/refresh"
+        "org.webosports.service.eink/setActive",
+        "org.webosports.service.eink/refresh",
+        "org.webosports.service.eink/watchKey"
     ]
 }
