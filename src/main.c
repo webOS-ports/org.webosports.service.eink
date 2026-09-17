@@ -39,15 +39,17 @@
  *   5  clear: a full refresh that wipes ghosting. Stock always follows it with
  *      3 and puts the base mode back 100 ms later, and so does this.
  *
- * (2 and 3 are also modes as far as the driver is concerned - the sibling
- * refresh_mode attribute reads the last selection back as 0..3 - but stock
- * never rests on either, so neither is offered.)
+ * 2 and 3 are modes too - the sibling refresh_mode attribute reads the last
+ * selection back as 0..3 - which stock never rests on; see the mode table for
+ * what they look like. Entering 3 or 4 from a greyscale mode is silent, but
+ * coming back to 1 or 2 is a double clearing flash on the panel, which is why
+ * auto's return is held back by the shell.
  *
  * Hybrid is "auto" here: the Balanced waveform while the screen is still, the fast
  * one while it is moving. Stock decides "moving" with a WindowMonitor inside
  * system_server that watches scroll, animation and video state; here the shell
  * decides, from the frames the compositor actually renders, and says so through
- * setActive. Without a shell to say anything, auto behaves as slow.
+ * setActive. Without a shell to say anything, auto behaves as Balanced.
  *
  * The chosen mode is persisted as the systemservice preference
  * "einkRefreshMode", the same store the Display panel already uses for its
@@ -60,8 +62,8 @@
  * handled here rather than in the compositor: the code is not in Qt's evdev
  * keymap so nothing else would see it, and reading it from evdev directly
  * means it works on the lock screen and before the shell is up. The long
- * press opens the Display settings, the LuneOS equivalent of the quick
- * settings.
+ * press is handed to the shell (watchKey), which shows its refresh menu; with
+ * no shell listening it opens the Display settings instead.
  */
 
 #include <errno.h>
