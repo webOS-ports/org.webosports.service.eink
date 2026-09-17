@@ -130,7 +130,7 @@ static const struct mode modes[] =
 };
 
 #define N_MODES ((int)(sizeof(modes) / sizeof(modes[0])))
-#define DEFAULT_MODE 2
+#define DEFAULT_MODE 1
 
 static LSHandle *service_handle = NULL;
 static GMainLoop *main_loop = NULL;
