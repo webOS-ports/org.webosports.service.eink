@@ -88,6 +88,14 @@
 #define RESTORE_DELAY_MS 100
 
 /*
+ * Stock never changes mode twice within 200 ms (setRefreshModeInternal drops
+ * the second request). Leaving the fast waveform is a full clearing flash, so
+ * two changes back to back are two flashes; a change asked for inside the
+ * window is applied when it expires instead.
+ */
+#define MIN_CHANGE_MS 200
+
+/*
  * The refresh key. Not in input-event-codes.h - 252 is vendor space - so it is
  * named here after Android's keylayout entry for it.
  */
@@ -133,6 +141,8 @@ static int current_mode = DEFAULT_MODE;
 static bool screen_active = false;
 static bool prefs_loaded = false;
 static guint restore_source = 0;
+static gint64 last_mode_write = 0;
+static guint deferred_source = 0;
 static guint prefs_retry_source = 0;
 static int prefs_attempts = 0;
 
@@ -238,7 +248,45 @@ static int wanted_value(void)
 
 static bool apply_mode(void)
 {
+	if (deferred_source)
+	{
+		g_source_remove(deferred_source);
+		deferred_source = 0;
+	}
+
+	last_mode_write = g_get_monotonic_time();
 	return write_register(wanted_value());
+}
+
+static gboolean apply_deferred(gpointer data)
+{
+	deferred_source = 0;
+	apply_mode();
+	return G_SOURCE_REMOVE;
+}
+
+/*
+ * apply_mode for the activity path: honours MIN_CHANGE_MS, and stays out of
+ * the way of a refresh that is still settling (restore_mode writes the wanted
+ * value when it fires, so nothing is lost).
+ */
+static void apply_mode_rate_limited(void)
+{
+	gint64 since_ms = (g_get_monotonic_time() - last_mode_write) / 1000;
+
+	if (restore_source)
+	{
+		return;
+	}
+
+	if (since_ms >= MIN_CHANGE_MS)
+	{
+		apply_mode();
+	}
+	else if (!deferred_source)
+	{
+		deferred_source = g_timeout_add(MIN_CHANGE_MS - since_ms, apply_deferred, NULL);
+	}
 }
 
 static jvalue_ref build_status(void)
@@ -582,10 +630,15 @@ static bool cb_set_active(LSHandle *sh, LSMessage *message, void *ctx)
 
 		screen_active = active;
 
-		/* No register write while a refresh is settling; restore_mode covers it. */
-		if (wanted_value() != before && !restore_source && ensure_register())
+		if (wanted_value() != before && ensure_register())
 		{
-			apply_mode();
+			apply_mode_rate_limited();
+		}
+		else if (deferred_source && wanted_value() == before)
+		{
+			/* Changed back before the deferred write went out: nothing to do. */
+			g_source_remove(deferred_source);
+			deferred_source = 0;
 		}
 
 		post_status();
