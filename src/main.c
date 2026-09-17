@@ -187,20 +187,25 @@ static bool ensure_register(void)
 		return true;
 	}
 
-	if (glob(REGISTER_GLOB, 0, NULL, &g) == 0 && g.gl_pathc > 0)
+	if (glob(REGISTER_GLOB, 0, NULL, &g) == 0)
 	{
-		register_path = g_strdup(g.gl_pathv[0]);
-		g_message("E Ink command register: %s", register_path);
+		if (g.gl_pathc > 0)
+		{
+			register_path = g_strdup(g.gl_pathv[0]);
+			g_message("E Ink command register: %s", register_path);
+		}
+
+		globfree(&g);
 	}
 
-	globfree(&g);
 	return register_path != NULL;
 }
 
 static bool write_register(int value)
 {
 	char buf[16];
-	int fd, len;
+	int fd, printed;
+	size_t len;
 	ssize_t n;
 
 	if (!ensure_register())
@@ -208,7 +213,14 @@ static bool write_register(int value)
 		return false;
 	}
 
-	len = snprintf(buf, sizeof(buf), "%d", value);
+	printed = snprintf(buf, sizeof(buf), "%d", value);
+
+	if (printed < 0 || (size_t)printed >= sizeof(buf))
+	{
+		return false;
+	}
+
+	len = (size_t)printed;
 	fd = open(register_path, O_WRONLY);
 
 	if (fd < 0)
@@ -220,7 +232,7 @@ static bool write_register(int value)
 	n = write(fd, buf, len);
 	close(fd);
 
-	if (n != len)
+	if (n < 0 || (size_t)n != len)
 	{
 		g_warning("write %d to %s: %s", value, register_path, g_strerror(errno));
 		return false;
@@ -287,7 +299,7 @@ static void apply_mode_rate_limited(void)
 	}
 	else if (!deferred_source)
 	{
-		deferred_source = g_timeout_add(MIN_CHANGE_MS - since_ms, apply_deferred, NULL);
+		deferred_source = g_timeout_add((guint)(MIN_CHANGE_MS - since_ms), apply_deferred, NULL);
 	}
 }
 
@@ -759,7 +771,6 @@ static void close_refresh_key(void)
 static gboolean on_key_event(GIOChannel *channel, GIOCondition cond, gpointer data)
 {
 	struct input_event ev;
-	ssize_t n;
 
 	if (cond & (G_IO_ERR | G_IO_HUP | G_IO_NVAL))
 	{
@@ -770,7 +781,7 @@ static gboolean on_key_event(GIOChannel *channel, GIOCondition cond, gpointer da
 		return G_SOURCE_REMOVE;
 	}
 
-	while ((n = read(key_fd, &ev, sizeof(ev))) == (ssize_t)sizeof(ev))
+	while (read(key_fd, &ev, sizeof(ev)) == (ssize_t)sizeof(ev))
 	{
 		if (ev.type != EV_KEY || ev.code != KEY_AREFRESH)
 		{
@@ -851,7 +862,9 @@ static gboolean scan_for_refresh_key(gpointer data)
 
 			g_message("refresh key (code %d) on %s (%s)", KEY_AREFRESH, path, name);
 			key_fd = fd;
-			key_source = g_io_add_watch(channel, G_IO_IN | G_IO_ERR | G_IO_HUP | G_IO_NVAL,
+			/* GIOCondition is a flags enum; the analyser's range check does not know. */
+			key_source = g_io_add_watch(channel,
+			                            (GIOCondition)(G_IO_IN | G_IO_ERR | G_IO_HUP | G_IO_NVAL), /* NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange) */
 			                            on_key_event, NULL);
 			g_io_channel_unref(channel);
 			break;
