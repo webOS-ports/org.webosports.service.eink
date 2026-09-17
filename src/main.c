@@ -41,15 +41,16 @@
  *
  * 2 and 3 are modes too - the sibling refresh_mode attribute reads the last
  * selection back as 0..3 - which stock never rests on; see the mode table for
- * what they look like. Entering 3 or 4 from a greyscale mode is silent, but
- * coming back to 1 or 2 is a double clearing flash on the panel, which is why
- * auto's return is held back by the shell.
+ * what they look like. Measured by eye on the MP01: every switch between 1, 3
+ * and 4 is silent, but *entering 2* - from 1, 3 or 4 alike - is a double
+ * clearing flash. So auto rests on 1, not on the otherwise nicer 2, and the
+ * flash is paid once when Balanced is chosen rather than at every hand-over.
  *
- * Hybrid is "auto" here: the Balanced waveform while the screen is still, the fast
+ * Hybrid is "auto" here: the Slow waveform while the screen is still, the fast
  * one while it is moving. Stock decides "moving" with a WindowMonitor inside
  * system_server that watches scroll, animation and video state; here the shell
  * decides, from the frames the compositor actually renders, and says so through
- * setActive. Without a shell to say anything, auto behaves as Balanced.
+ * setActive. Without a shell to say anything, auto behaves as Slow.
  *
  * The chosen mode is persisted as the systemservice preference
  * "einkRefreshMode", the same store the Display panel already uses for its
@@ -126,7 +127,7 @@ static const struct mode modes[] =
 {
 	{ "slow",     1, 0, "Slow",     "Full greyscale, best for images; slowest." },
 	{ "balanced", 2, 0, "Balanced", "Greyscale; clearer text and less ghosting than Slow." },
-	{ "auto",     2, 4, "Auto",     "Balanced while the screen is still, Ultra while it is moving." },
+	{ "auto",     1, 4, "Auto",     "Slow while the screen is still, Ultra while it is moving; no flashing hand-over." },
 	{ "text",     3, 0, "Text",     "Nearly black and white: crisp text, images lose their greys." },
 	{ "ultra",    4, 0, "Ultra",    "Fastest refresh; most ghosting, best for scrolling and video." },
 };
