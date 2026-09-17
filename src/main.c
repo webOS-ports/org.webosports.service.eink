@@ -104,15 +104,25 @@ struct mode
 	const char *description;
 };
 
+/*
+ * All four of the CPLD's waveform modes, in order of speed, as seen on the
+ * MP01 (stock only ever names 1 and 4):
+ *   1  full greyscale, the slowest and the one stock calls "Slow"
+ *   2  greyscale, visibly clearer with less ghosting than 1
+ *   3  nearly two-level: greys collapse, text stays crisp, images suffer
+ *   4  the fastest, most ghosting - stock's "Ultra"
+ */
 static const struct mode modes[] =
 {
-	{ "slow",  1, 0, "Slow",  "Best quality; for reading and text." },
-	{ "auto",  1, 4, "Auto",  "Best quality while the screen is still, fast refresh while it is moving." },
-	{ "ultra", 4, 0, "Ultra", "Fast refresh; more ghosting, better for scrolling and video." },
+	{ "slow",     1, 0, "Slow",     "Full greyscale, best for images; slowest." },
+	{ "balanced", 2, 0, "Balanced", "Greyscale; clearer text and less ghosting than Slow." },
+	{ "auto",     1, 4, "Auto",     "Slow while the screen is still, Ultra while it is moving." },
+	{ "text",     3, 0, "Text",     "Nearly black and white: crisp text, images lose their greys." },
+	{ "ultra",    4, 0, "Ultra",    "Fastest refresh; most ghosting, best for scrolling and video." },
 };
 
 #define N_MODES ((int)(sizeof(modes) / sizeof(modes[0])))
-#define DEFAULT_MODE 1
+#define DEFAULT_MODE 2
 
 static LSHandle *service_handle = NULL;
 static GMainLoop *main_loop = NULL;
