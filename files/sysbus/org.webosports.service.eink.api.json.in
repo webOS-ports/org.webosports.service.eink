@@ -1,0 +1,7 @@
+{
+    "eink.operation": [
+        "org.webosports.service.eink/getStatus",
+        "org.webosports.service.eink/setMode",
+        "org.webosports.service.eink/refresh"
+    ]
+}

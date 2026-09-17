@@ -1,0 +1,7 @@
+{
+    "org.webosports.service.eink": [
+        "servicebus.signal",
+        "systemsettings.query",
+        "systemsettings.management"
+    ]
+}

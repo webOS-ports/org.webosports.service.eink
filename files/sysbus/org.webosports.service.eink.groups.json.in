@@ -1,0 +1,4 @@
+{
+    "allowedNames": ["org.webosports.service.eink"],
+    "eink.operation": ["dev"]
+}

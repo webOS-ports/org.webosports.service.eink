@@ -1,0 +1,22 @@
+[Unit]
+Description=LuneOS E Ink refresh service
+
+# The registration made with the hub cannot outlive it, and nothing in the
+# process re-establishes one, so einkd is restarted whenever the hub is: PartOf
+# covers the deliberate restart, the disconnect handler in main.c the crash.
+After=ls-hubd.service
+PartOf=ls-hubd.service
+
+# Not conditioned on the sysfs node existing: the panel modules are loaded by
+# the vendor's own loader, with no ordering against this unit, so a condition
+# checked at start would skip the service on a slow boot. main.c looks the node
+# up on demand instead and answers available:false until it is there.
+
+[Service]
+Type=simple
+ExecStart=@WEBOS_INSTALL_SBINDIR@/einkd
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

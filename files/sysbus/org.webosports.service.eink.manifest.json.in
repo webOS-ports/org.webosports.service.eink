@@ -1,0 +1,9 @@
+{
+    "id": "org.webosports.service.eink",
+    "version": "1.0.0",
+    "roleFiles": ["@WEBOS_INSTALL_WEBOS_SYSBUSDIR@/roles.d/org.webosports.service.eink.role.json"],
+    "serviceFiles": ["@WEBOS_INSTALL_WEBOS_SYSBUSDIR@/services.d/org.webosports.service.eink.service"],
+    "apiPermissionFiles": ["@WEBOS_INSTALL_WEBOS_SYSBUSDIR@/api-permissions.d/org.webosports.service.eink.api.json"],
+    "clientPermissionFiles": ["@WEBOS_INSTALL_WEBOS_SYSBUSDIR@/client-permissions.d/org.webosports.service.eink.perm.json"],
+    "groupsFiles": ["@WEBOS_INSTALL_WEBOS_SYSBUSDIR@/groups.d/org.webosports.service.eink.groups.json"]
+}

@@ -1,0 +1,13 @@
+{
+    "exeName": "@WEBOS_INSTALL_SBINDIR@/einkd",
+    "trustLevel": "oem",
+    "type": "regular",
+    "allowedNames": ["org.webosports.service.eink", ""],
+    "permissions": [
+        {
+            "service": "org.webosports.service.eink",
+            "inbound": ["*"],
+            "outbound": ["*"]
+        }
+    ]
+}

@@ -1,0 +1,54 @@
+org.webosports.service.eink
+===========================
+
+Summary
+-------
+Refresh-mode control for E Ink panels, on the luna-service2 bus.
+
+Description
+-----------
+Known hardware: the Minimal Phone MP01 (Pango CPLD, stock
+`panel-z10-eink-i2c.ko`). Its command register is
+`/sys/bus/i2c/drivers/eink_cpld/*/eink_cpld_registers`; the values written and
+the full-refresh sequence follow stock Android's `MinimalRefreshService`
+(`services.jar`). See the comment at the top of `src/main.c`.
+
+API
+---
+All methods are in the `eink.operation` ACG group.
+
+### `getStatus`
+
+`{"subscribe": true}` optional.
+
+```json
+{
+  "returnValue": true,
+  "available": true,
+  "mode": "slow",
+  "modes": [
+    {"id": "slow",  "label": "Slow",  "description": "Best quality; for reading and text."},
+    {"id": "ultra", "label": "Ultra", "description": "Fast refresh; more ghosting, better for scrolling and video."}
+  ]
+}
+```
+
+`available` is false on a device without a supported panel; `modes` is still
+listed so a client can lay itself out before the hardware answers.
+
+### `setMode`
+
+`{"mode": "<id>"}` — applies the mode and stores it as the systemservice
+preference `einkRefreshMode`, from which it is restored at boot. Replies with
+the status.
+
+### `refresh`
+
+`{}` — a full refresh (clear) that removes ghosting; the current mode is put
+back afterwards. Replies with the status.
+
+Copyright and License Information
+---------------------------------
+Copyright (c) 2026 Herman van Hazendonk
+
+Licensed under the Apache License, Version 2.0.
